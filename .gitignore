@@ -28,7 +28,6 @@ wheels/
 
 # Data and models
 data_set/
-*.pth
 *.pkl
 *.h5
 
