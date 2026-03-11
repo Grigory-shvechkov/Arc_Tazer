@@ -8,18 +8,27 @@ import csv
 # -----------------------
 # CONFIG
 # -----------------------
-MODEL_PATH = "shock_classifier.pth"  # Your .pth file
+MODEL_PATH = "damage_classifier.pth"
 IMG_SIZE = 224
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-FOLDER_TO_PREDICT = "data_set/val/no_shock"  # Change to any folder of images
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+FOLDER_TO_PREDICT = "data_set/val"   # can point to ANY folder of images
 OUTPUT_CSV = "predictions.csv"
 
+print("Using device:", DEVICE)
+
 # -----------------------
-# MODEL
+# LOAD MODEL + CLASS NAMES
 # -----------------------
+checkpoint = torch.load(MODEL_PATH, map_location=DEVICE)
+
+class_names = checkpoint["class_names"]
+num_classes = len(class_names)
+
+print("Loaded classes:", class_names)
+
 model = models.resnet18(weights=None)
-model.fc = nn.Linear(model.fc.in_features, 2)  # shock / no_shock
-model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
+model.fc = nn.Linear(model.fc.in_features, num_classes)
+model.load_state_dict(checkpoint["model_state_dict"])
 model = model.to(DEVICE)
 model.eval()
 
@@ -40,31 +49,58 @@ def predict(image_path):
 
     with torch.no_grad():
         output = model(img_tensor)
-        probs = torch.softmax(output, dim=1)  # tensor stays
-        pred_class = torch.argmax(probs, dim=1).item()
-        pred_label = "shock" if pred_class == 1 else "no_shock"
-        prob_no_shock = round(probs[0,0].item() * 100, 2)
-        prob_shock    = round(probs[0,1].item() * 100, 2)
+        probs = torch.softmax(output, dim=1)
+        pred_index = torch.argmax(probs, dim=1).item()
+        pred_label = class_names[pred_index]
 
-    return pred_label, prob_no_shock, prob_shock
+        # Convert probabilities to readable dict
+        prob_dict = {
+            class_names[i]: round(probs[0, i].item() * 100, 2)
+            for i in range(num_classes)
+        }
+
+    return pred_label, prob_dict
+
+# -----------------------
+# GATHER ALL IMAGES (recursive)
+# -----------------------
+image_paths = []
+
+for root, dirs, files in os.walk(FOLDER_TO_PREDICT):
+    for file in files:
+        if file.lower().endswith((".png", ".jpg", ".jpeg")):
+            image_paths.append(os.path.join(root, file))
+
+print(f"Found {len(image_paths)} images.")
 
 # -----------------------
 # BATCH PREDICTION
 # -----------------------
 results = []
-for file in os.listdir(FOLDER_TO_PREDICT):
-    if file.lower().endswith((".png", ".jpg", ".jpeg")):
-        path = os.path.join(FOLDER_TO_PREDICT, file)
-        label, no_shock_pct, shock_pct = predict(path)
-        results.append([file, label, no_shock_pct, shock_pct])
-        print(f"{file}: {label}, no_shock {no_shock_pct}%, shock {shock_pct}%")
+
+for path in image_paths:
+    filename = os.path.basename(path)
+    pred_label, prob_dict = predict(path)
+
+    row = [filename, pred_label]
+    for cls in class_names:
+        row.append(prob_dict[cls])
+
+    results.append(row)
+
+    print(f"\n{filename}")
+    print(f"Predicted: {pred_label}")
+    for cls in class_names:
+        print(f"   {cls}: {prob_dict[cls]}%")
 
 # -----------------------
 # SAVE TO CSV
 # -----------------------
 with open(OUTPUT_CSV, "w", newline="") as f:
     writer = csv.writer(f)
-    writer.writerow(["filename", "predicted", "prob_no_shock (%)", "prob_shock (%)"])
+
+    header = ["filename", "predicted"] + [f"prob_{cls} (%)" for cls in class_names]
+    writer.writerow(header)
     writer.writerows(results)
 
 print(f"\nPredictions saved to {OUTPUT_CSV}")

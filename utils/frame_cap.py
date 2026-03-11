@@ -5,7 +5,7 @@ import os
 video_path = "input.mp4"
 
 project_root = os.path.dirname(os.path.abspath(__file__))
-output_dir = os.path.join(project_root, "no_shock")
+output_dir = os.path.join(project_root, "image_cap")
 os.makedirs(output_dir, exist_ok=True)
 
 cap = cv2.VideoCapture(video_path)
